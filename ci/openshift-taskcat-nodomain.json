@@ -28,7 +28,7 @@
         "ParameterValue": "override"
     },
     {
-        "ParameterValue": "3.9",
+        "ParameterValue": "3.10",
         "ParameterKey": "OpenshiftContainerPlatformVersion"
     },
     {
@@ -46,6 +46,11 @@
     {
         "ParameterKey": "QSS3BucketName",
         "ParameterValue": "$[taskcat_autobucket]"
+    },
+    {
+        "ParameterKey": "GlusterFS",
+        "ParameterValue": "Disabled"
     }
+
 
 ]
