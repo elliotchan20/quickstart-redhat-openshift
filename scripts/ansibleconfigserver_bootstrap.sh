@@ -13,7 +13,7 @@ qs_retry_command 25 aws s3 cp ${QS_S3URI}scripts/redhat_ose-register-${OCP_VERSI
 chmod 755 ~/redhat_ose-register.sh
 qs_retry_command 20 ~/redhat_ose-register.sh ${RH_USER} ${RH_PASS} ${RH_POOLID}
 
-qs_retry_command 10 yum -y install ansible-2.4.6.0 yum-versionlock
+qs_retry_command 10 yum -y install https://releases.ansible.com/ansible/rpm/release/epel-7-x86_64/ansible-2.6.5-1.el7.ans.noarch.rpm yum-versionlock
 sed -i 's/#host_key_checking = False/host_key_checking = False/g' /etc/ansible/ansible.cfg
 yum versionlock add ansible
 yum repolist -v | grep OpenShift
