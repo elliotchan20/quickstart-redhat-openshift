@@ -59,3 +59,11 @@ It is a good idea to go to your Red Hat account portal and ensure that your host
 If you do not already have access to a Red Hat account then go to the following to register and get access (note that that may require a non-personal email address for registration)
 
 [https://www.redhat.com/wapps/eval/index.html?evaluation_id=1026](https://www.redhat.com/wapps/eval/index.html?evaluation_id=1026)
+
+## Origin Support
+The CFN templates support choosing Origin as the platform instead of OCP. This will use the CentOS7 as the base.
+A few things to be aware of:
+* The templates still require the RedHat Username, Password and PoolID to have entries. It is recommended to use parameter store for these instead of CFN parameters. You can use encrypted values to protect passwords and pool IDs.
+* I created these for us in ca-central-1 region, so one would need to add AMIs for CentOS7 in other regions if they are needed
+* ca-central-1 only has two AZ's so I've modified the templates to use only two AZ's
+* I extensively use the pre-install and post-install hooks. I use the pre-install hooks to set up OpenID Connect authentication and the post-install hooks to create some daemonsets for logging and metrics to be sent out of the cluster.
