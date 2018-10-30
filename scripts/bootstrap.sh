@@ -20,9 +20,16 @@ printf "KubernetesClusterID=owned\n" >> /etc/aws/aws.conf
 
 if [ "${LAUNCH_CONFIG}" != "OpenShiftEtcdLaunchConfig" ]; then
     if [ "${OCP_VERSION}" != "3.9" ] ; then
+        # TODO: this script does NOT work with Origin 3.10
         yum install docker-client-1.13.1 docker-common-1.13.1 docker-rhel-push-plugin-1.13.1 docker-1.13.1 -y
     else
-        yum install docker-client-1.12.6 docker-common-1.12.6 docker-rhel-push-plugin-1.12.6 docker-1.12.6 -y
+        # OpenShift 3.9
+        if [ "${OCP_OR_ORIGIN}" == "origin" ]
+        then
+            yum install centos-release-openshift-origin39 docker-1.13.1 -y
+        else
+            yum install docker-client-1.12.6 docker-common-1.12.6 docker-rhel-push-plugin-1.12.6 docker-1.12.6 -y
+        fi
     fi
     systemctl enable docker.service
     qs_retry_command 20 'systemctl start docker.service'
@@ -37,10 +44,25 @@ if [ "${LAUNCH_CONFIG}" != "OpenShiftEtcdLaunchConfig" ]; then
 fi
 
 qs_retry_command 10 cfn-init -v  --stack ${AWS_STACKNAME} --resource ${LAUNCH_CONFIG} --configsets quickstart --region ${AWS_REGION}
-qs_retry_command 10 yum install -y wget atomic-openshift-docker-excluder atomic-openshift-node \
+case ${OCP_OR_ORIGIN} in
+    origin)
+        qs_retry_command 10 yum install -y origin-docker-excluder origin-node \
+            origin-sdn-ovs ceph-common conntrack-tools dnsmasq glusterfs \
+            glusterfs-client-xlators glusterfs-fuse glusterfs-libs iptables-services \
+            iscsi-initiator-utils iscsi-initiator-utils-iscsiuio tuned-profiles-atomic
+        ;;
+    ocp)
+        qs_retry_command 10 yum install -y wget atomic-openshift-docker-excluder atomic-openshift-node \
     atomic-openshift-sdn-ovs ceph-common conntrack-tools dnsmasq glusterfs \
     glusterfs-client-xlators glusterfs-fuse glusterfs-libs iptables-services \
     iscsi-initiator-utils iscsi-initiator-utils-iscsiuio tuned-profiles-atomic-openshift-node
+        ;;
+    *)
+        echo "Unknown version ${OCP_OR_ORIGIN}"
+        exit 1
+        ;;
+esac
+
 
 systemctl restart dbus
 systemctl restart dnsmasq
@@ -49,7 +71,7 @@ systemctl restart NetworkManager
 systemctl restart systemd-logind
 
 cd /tmp
-qs_retry_command 10 wget https://s3-us-west-1.amazonaws.com/amazon-ssm-us-west-1/latest/linux_amd64/amazon-ssm-agent.rpm
+qs_retry_command 10 curl -LO https://s3-us-west-1.amazonaws.com/amazon-ssm-us-west-1/latest/linux_amd64/amazon-ssm-agent.rpm
 qs_retry_command 10 yum install -y ./amazon-ssm-agent.rpm
 systemctl start amazon-ssm-agent
 systemctl enable amazon-ssm-agent

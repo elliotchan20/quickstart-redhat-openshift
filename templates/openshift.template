@@ -11,10 +11,8 @@ Metadata:
           - VPCCIDR
           - PrivateSubnet1ID
           - PrivateSubnet2ID
-          - PrivateSubnet3ID
           - PublicSubnet1ID
           - PublicSubnet2ID
-          - PublicSubnet3ID
           - RemoteAccessCIDR
           - ContainerAccessCIDR
       - Label:
@@ -43,6 +41,7 @@ Metadata:
           default: OpenShift Configuration
         Parameters:
           - OpenshiftContainerPlatformVersion
+          - OpenShiftOriginEnabled
           - AWSServiceBroker
           - HawkularMetrics
           - AnsibleFromGit
@@ -76,14 +75,10 @@ Metadata:
         default: Private Subnet 1 ID
       PrivateSubnet2ID:
         default: Private Subnet 2 ID
-      PrivateSubnet3ID:
-        default: Private Subnet 3 ID
       PublicSubnet1ID:
         default: Public Subnet 1 ID
       PublicSubnet2ID:
         default: Public Subnet 2 ID
-      PublicSubnet3ID:
-        default: Public Subnet 3 ID
       QSS3BucketName:
         default: Quick Start S3 Bucket Name
       QSS3KeyPrefix:
@@ -106,6 +101,8 @@ Metadata:
         default: Red Hat Pool ID
       OpenshiftContainerPlatformVersion:
         default: Openshift Container Platform Version
+      OpenShiftOriginEnabled:
+        default: Use OpenShift Origin instead of OCP
       MasterInstanceType:
         default: Master Instance Type
       EtcdInstanceType:
@@ -174,10 +171,6 @@ Parameters:
     Description: ID of private subnet 2 in Availability Zone 2 for the Workload (e.g.,
       subnet-b1f432cd)
     Type: AWS::EC2::Subnet::Id
-  PrivateSubnet3ID:
-    Description: ID of private subnet 3 in Availability Zone 3 for the Workload (e.g.,
-      subnet-b1f4a2cd)
-    Type: AWS::EC2::Subnet::Id
   PublicSubnet1ID:
     Description: ID of public subnet 1 in Availability Zone 1 for the ELB load balancer
       (e.g., subnet-9bc642ac)
@@ -185,10 +178,6 @@ Parameters:
   PublicSubnet2ID:
     Description: ID of public subnet 2 in Availability Zone 2 for the ELB load balancer
       (e.g., subnet-e3246d8e)
-    Type: AWS::EC2::Subnet::Id
-  PublicSubnet3ID:
-    Description: ID of public subnet 3 in Availability Zone 3 for the ELB load balancer
-      (e.g., subnet-e324ad8e)
     Type: AWS::EC2::Subnet::Id
   QSS3BucketName:
     AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
@@ -241,11 +230,18 @@ Parameters:
     Type: String
   OpenshiftContainerPlatformVersion:
     Description: OpenShift version to deploy
-    Default: '3.10'
+    Default: '3.9'
     Type: String
     AllowedValues:
       - '3.9'
       - '3.10'
+  OpenShiftOriginEnabled:
+    Description: Use OpenShift Origin instead of OCP
+    Type: String
+    Default: Disabled
+    AllowedValues:
+      - Enabled
+      - Disabled
   VPCCIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
     ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
@@ -359,7 +355,7 @@ Parameters:
       - Enabled
       - Disabled
   AnsibleFromGit:
-    Default: False
+    Default: True
     Description: Get openshift installer playbooks from GitHub. By default, they come from RPM.
     Type: String
     AllowedValues:
@@ -429,6 +425,24 @@ Rules:
             - VpcId
           - !RefAll 'AWS::EC2::VPC::Id'
         AssertDescription: All subnets must in the VPC
+  RHELCredsForOCP:
+    RuleCondition: !Equals
+      - !Ref 'OpenShiftOriginEnabled'
+      - Disabled
+    Assertions:
+      - Assert: !And
+          - !Not
+            - !Equals
+              - RedhatSubscriptionUserName
+              - ''
+          - !Not
+            - !Equals
+              - RedhatSubscriptionPassword
+              - ''
+          - !Not
+            - !Equals
+              - RedhatSubscriptionPoolID
+              - ''
 Mappings:
   AWSAMIRegionMap:
     AMI:
@@ -453,9 +467,14 @@ Mappings:
       RHEL75HVM: ami-5026902d
     ap-southeast-1:
       RHEL75HVM: ami-76144b0a
+    ca-central-1:
+      RHEL75HVM: ami-49f0762d
+      CentOS7HVM: ami-e802818c
   LinuxAMINameMap:
     Redhat-Enterprise-Linux-7:
       Code: RHEL75HVM
+    CentOS-7:
+      Code: CentOS7HVM
   OpenshiftVersionMap:
     '3.9':
       AnsiblePlaybookGitRepoTag: 3.9.45-1
@@ -535,6 +554,9 @@ Conditions:
     - !Equals
       - !Ref 'DomainName'
       - ''
+  UseOrigin: !Equals
+    - !Ref 'OpenShiftOriginEnabled'
+    - Enabled
   EnableHawkular: !Equals
     - !Ref 'HawkularMetrics'
     - Enabled
@@ -1276,7 +1298,6 @@ Resources:
       VPCZoneIdentifier:
         - !Ref 'PrivateSubnet1ID'
         - !Ref 'PrivateSubnet2ID'
-        - !Ref 'PrivateSubnet3ID'
     CreationPolicy:
       ResourceSignal:
         Count: !Ref 'NumberOfMaster'
@@ -1298,7 +1319,6 @@ Resources:
       VPCZoneIdentifier:
         - !Ref 'PrivateSubnet1ID'
         - !Ref 'PrivateSubnet2ID'
-        - !Ref 'PrivateSubnet3ID'
     CreationPolicy:
       ResourceSignal:
         Count: !Ref 'NumberOfEtcd'
@@ -1332,7 +1352,6 @@ Resources:
       VPCZoneIdentifier:
         - !Ref 'PrivateSubnet1ID'
         - !Ref 'PrivateSubnet2ID'
-        - !Ref 'PrivateSubnet3ID'
     CreationPolicy:
       ResourceSignal:
         Count: !Ref 'NumberOfNodes'
@@ -1363,7 +1382,6 @@ Resources:
       VPCZoneIdentifier:
         - !Ref 'PrivateSubnet1ID'
         - !Ref 'PrivateSubnet2ID'
-        - !Ref 'PrivateSubnet3ID'
     CreationPolicy:
       ResourceSignal:
         Count: !Ref 'NumberOfGluster'
@@ -1407,10 +1425,16 @@ Resources:
       ImageId: !If
         - UseCustomAmi
         - !Ref 'AmiId'
-        - !FindInMap
-          - AWSAMIRegionMap
-          - !Ref 'AWS::Region'
-          - RHEL75HVM
+        - !If
+          - UseOrigin
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - CentOS7HVM
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - RHEL75HVM
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -1449,6 +1473,7 @@ Resources:
             export RH_USER=${RedhatSubscriptionUserName}
             export RH_PASS='${RedhatSubscriptionPassword}'
             export OCP_VERSION=${OpenshiftContainerPlatformVersion}
+            export OCP_OR_ORIGIN=${OriginOrOCP}
             export LAUNCH_CONFIG=OpenShiftGlusterLaunchConfig
             aws s3 cp ${!QS_S3URI}scripts/bootstrap.sh ./bootstrap.sh
             chmod +x bootstrap.sh
@@ -1456,6 +1481,7 @@ Resources:
             cfn-signal -e $(qs_status) --stack ${AWS::StackName} --resource OpenShiftGlusterASG --region ${AWS::Region}
           -
             S3Region: !If [ GovCloudCondition, s3-us-gov-west-1, s3 ]
+            OriginOrOCP: !If [ UseOrigin, origin, ocp ]
   OpenShiftEtcdLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Metadata:
@@ -1491,10 +1517,16 @@ Resources:
               ignoreErrors: 'false'
     Properties:
       KeyName: !Ref 'KeyPairName'
-      ImageId: !FindInMap
-        - AWSAMIRegionMap
-        - !Ref 'AWS::Region'
-        - RHEL75HVM
+      ImageId: !If
+        - UseOrigin
+        - !FindInMap
+          - AWSAMIRegionMap
+          - !Ref 'AWS::Region'
+          - CentOS7HVM
+        - !FindInMap
+          - AWSAMIRegionMap
+          - !Ref 'AWS::Region'
+          - RHEL75HVM
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -1524,6 +1556,7 @@ Resources:
             export RH_USER=${RedhatSubscriptionUserName}
             export RH_PASS='${RedhatSubscriptionPassword}'
             export OCP_VERSION=${OpenshiftContainerPlatformVersion}
+            export OCP_OR_ORIGIN=${OriginOrOCP}
             export LAUNCH_CONFIG=OpenShiftEtcdLaunchConfig
             aws s3 cp ${!QS_S3URI}scripts/bootstrap.sh ./bootstrap.sh
             chmod +x bootstrap.sh
@@ -1531,6 +1564,7 @@ Resources:
             cfn-signal -e $(qs_status) --stack ${AWS::StackName} --resource OpenShiftEtcdASG --region ${AWS::Region}
           -
             S3Region: !If [ GovCloudCondition, s3-us-gov-west-1, s3 ]
+            OriginOrOCP: !If [ UseOrigin, origin, ocp ]
   OpenShiftNodesLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Metadata:
@@ -1569,10 +1603,16 @@ Resources:
       ImageId: !If
         - UseCustomAmi
         - !Ref 'AmiId'
-        - !FindInMap
-          - AWSAMIRegionMap
-          - !Ref 'AWS::Region'
-          - RHEL75HVM
+        - !If
+          - UseOrigin
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - CentOS7HVM
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - RHEL75HVM
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -1606,6 +1646,7 @@ Resources:
             export RH_USER=${RedhatSubscriptionUserName}
             export RH_PASS='${RedhatSubscriptionPassword}'
             export OCP_VERSION=${OpenshiftContainerPlatformVersion}
+            export OCP_OR_ORIGIN=${OriginOrOCP}
             export LAUNCH_CONFIG=OpenShiftNodesLaunchConfig
             aws s3 cp ${!QS_S3URI}scripts/bootstrap.sh ./bootstrap.sh
             chmod +x bootstrap.sh
@@ -1613,6 +1654,7 @@ Resources:
             cfn-signal -e $(qs_status) --stack ${AWS::StackName} --resource OpenShiftNodeASG --region ${AWS::Region}
           -
             S3Region: !If [ GovCloudCondition, s3-us-gov-west-1, s3 ]
+            OriginOrOCP: !If [ UseOrigin, origin, ocp ]
   OpenShiftMasterASLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Metadata:
@@ -1651,10 +1693,16 @@ Resources:
       ImageId: !If
         - UseCustomAmi
         - !Ref 'AmiId'
-        - !FindInMap
-          - AWSAMIRegionMap
-          - !Ref 'AWS::Region'
-          - RHEL75HVM
+        - !If
+          - UseOrigin
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - CentOS7HVM
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - RHEL75HVM
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -1688,6 +1736,7 @@ Resources:
             export RH_USER=${RedhatSubscriptionUserName}
             export RH_PASS='${RedhatSubscriptionPassword}'
             export OCP_VERSION=${OpenshiftContainerPlatformVersion}
+            export OCP_OR_ORIGIN=${OriginOrOCP}
             export LAUNCH_CONFIG=OpenShiftMasterASLaunchConfig
             export INTERNAL_MASTER_ELBDNSNAME=${OpenShiftMasterInternalELB.DNSName}
             aws s3 cp ${!QS_S3URI}scripts/bootstrap.sh ./bootstrap.sh
@@ -1697,6 +1746,7 @@ Resources:
             cfn-signal -e $(qs_status) --stack ${AWS::StackName} --resource OpenShiftMasterASG --region ${AWS::Region}
           -
             S3Region: !If [ GovCloudCondition, s3-us-gov-west-1, s3 ]
+            OriginOrOCP: !If [ UseOrigin, origin, ocp ]
   CleanupPVRole:
     Type: AWS::IAM::Role
     Properties:
@@ -1866,7 +1916,6 @@ Resources:
       Subnets:
         - !Ref 'PublicSubnet1ID'
         - !Ref 'PublicSubnet2ID'
-        - !Ref 'PublicSubnet3ID'
       SecurityGroups:
         - !Ref 'OpenShiftSecurityGroup'
       Listeners:
@@ -1905,7 +1954,6 @@ Resources:
       Subnets:
         - !Ref 'PublicSubnet1ID'
         - !Ref 'PublicSubnet2ID'
-        - !Ref 'PublicSubnet3ID'
       SecurityGroups:
         - !Ref 'OpenShiftNodeSecurityGroup'
       Listeners:
@@ -1954,7 +2002,6 @@ Resources:
       Subnets:
         - !Ref 'PrivateSubnet1ID'
         - !Ref 'PrivateSubnet2ID'
-        - !Ref 'PrivateSubnet3ID'
       Type: network
       Tags:
         - Key: !Sub
@@ -2041,10 +2088,16 @@ Resources:
       ImageId: !If
         - UseCustomAmi
         - !Ref 'AmiId'
-        - !FindInMap
-          - AWSAMIRegionMap
-          - !Ref 'AWS::Region'
-          - RHEL75HVM
+        - !If
+          - UseOrigin
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - CentOS7HVM
+          - !FindInMap
+            - AWSAMIRegionMap
+            - !Ref 'AWS::Region'
+            - RHEL75HVM
       IamInstanceProfile: !Ref 'SetupRoleProfile'
       Tags:
         - Key: Name
@@ -2072,6 +2125,7 @@ Resources:
             export AWS_REGION=${AWS::Region}
             export CONTAINERACCESSELB=${ContainerAccessELB}
             export OCP_VERSION=${OpenshiftContainerPlatformVersion}
+            export OCP_OR_ORIGIN=${OriginOrOCP}
             export RH_USER=${RedhatSubscriptionUserName}
             export RH_PASS='${RedhatSubscriptionPassword}'
             export RH_POOLID=${RedhatSubscriptionPoolID}
@@ -2095,12 +2149,14 @@ Resources:
             qs_bootstrap_pip || qs_err " pip bootstrap failed "
             qs_aws-cfn-bootstrap || qs_err "cfn bootstrap failed"
             pip install awscli  &> /var/log/userdata.awscli_install.log || qs_err " awscli install failed "
+            aws s3 sync ${!QS_S3URI}scripts/custom /quickstart
             aws s3 cp ${!QS_S3URI}scripts/ansibleconfigserver_bootstrap.sh ./bootstrap.sh
             chmod +x bootstrap.sh
             ./bootstrap.sh || qs_err " Openshift installation failed, see logs for details "
             cfn-signal -e $(qs_status) --stack ${AWS::StackName} --resource AnsibleConfigServer --region ${AWS::Region}
           -
             S3Region: !If [ GovCloudCondition, s3-us-gov-west-1, s3 ]
+            OriginOrOCP: !If [ UseOrigin, origin, ocp ]
             HawkEnable: !If [ EnableHawkular, "True", "False" ]
             OsbRelease: !FindInMap [ OpenshiftVersionMap, !Ref 'OpenshiftContainerPlatformVersion', AnsiblePlaybookGitRepoTag ]
             LbHostname: !If [ UseCustomDomain, !If [ UseSubdomain, !Sub "${SubDomainPrefix}.${DomainName}", !Ref "DomainName" ], !GetAtt OpenShiftMasterELB.DNSName ]

@@ -7,14 +7,11 @@ Metadata:
       - Label:
           default: Network Configuration
         Parameters:
-          - AvailabilityZones
           - VPCCIDR
           - PrivateSubnet1CIDR
           - PrivateSubnet2CIDR
-          - PrivateSubnet3CIDR
           - PublicSubnet1CIDR
           - PublicSubnet2CIDR
-          - PublicSubnet3CIDR
           - RemoteAccessCIDR
           - ContainerAccessCIDR
       - Label:
@@ -42,6 +39,7 @@ Metadata:
           default: OpenShift Configuration
         Parameters:
           - OpenshiftContainerPlatformVersion
+          - OpenShiftOriginEnabled
           - AWSServiceBroker
           - HawkularMetrics
           - AnsibleFromGit
@@ -75,14 +73,10 @@ Metadata:
         default: Private Subnet 1 CIDR
       PrivateSubnet2CIDR:
         default: Private Subnet 2 CIDR
-      PrivateSubnet3CIDR:
-        default: Private Subnet 3 CIDR
       PublicSubnet1CIDR:
         default: Public Subnet 1 CIDR
       PublicSubnet2CIDR:
         default: Public Subnet 2 CIDR
-      PublicSubnet3CIDR:
-        default: Public Subnet 3 CIDR
       QSS3BucketName:
         default: Quick Start S3 Bucket Name
       QSS3KeyPrefix:
@@ -103,6 +97,8 @@ Metadata:
         default: Red Hat Pool ID
       OpenshiftContainerPlatformVersion:
         default: Openshift Container Platform Version
+      OpenShiftOriginEnabled:
+        default: Use OpenShift Origin instead of OCP
       MasterInstanceType:
         default: Master Instance Type
       EtcdInstanceType:
@@ -143,8 +139,6 @@ Metadata:
         default: Gluster Storage Encrypted
       AutomationBroker:
         default: OpenSift Automation Broker
-      AvailabilityZones:
-        default: Availability Zones
       AnsibleFromGit:
         default: Get Ansible from Git
       ClusterName:
@@ -159,11 +153,6 @@ Parameters:
       If left blank, we'll use the base RHEL image from your region.
     Type: String
     Default: ""
-  AvailabilityZones:
-    Description: List of Availability Zones to use for the subnets in the VPC. Three
-      Availability Zones are used for this deployment, and the logical order of your
-      selections is preserved.
-    Type: List<AWS::EC2::AvailabilityZone::Name>
   KeyPairName:
     Description: The name of an existing public/private key pair, which allows you
       to securely connect to your instance after it launches
@@ -180,12 +169,6 @@ Parameters:
     Default: 10.0.32.0/19
     Description: CIDR block for private subnet 2 located in Availability Zone 2
     Type: String
-  PrivateSubnet3CIDR:
-    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.64.0/19
-    Description: CIDR block for private subnet 2 located in Availability Zone 3
-    Type: String
   PublicSubnet1CIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
     ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
@@ -199,13 +182,6 @@ Parameters:
     Default: 10.0.144.0/20
     Description: CIDR block for the public (DMZ) subnet 2 located in Availability
       Zone 2
-    Type: String
-  PublicSubnet3CIDR:
-    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.160.0/20
-    Description: CIDR block for the public (DMZ) subnet 2 located in Availability
-      Zone 3
     Type: String
   QSS3BucketName:
     AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
@@ -259,9 +235,16 @@ Parameters:
     Type: String
   OpenshiftContainerPlatformVersion:
     Description: OpenShift version to deploy
-    Default: '3.10'
+    Default: '3.9'
     Type: String
     AllowedValues: [ '3.9', '3.10' ]
+  OpenShiftOriginEnabled:
+    Description: Use OpenShift Origin instead of OCP
+    Type: String
+    Default: Disabled
+    AllowedValues:
+      - Enabled
+      - Disabled
   VPCCIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
     ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
@@ -363,7 +346,7 @@ Parameters:
     Type: String
     AllowedValues: [ Enabled, Disabled ]
   GlusterFS:
-    Default: Enabled
+    Default: Disabled
     Description: Enable GlusterFS storage cluster
     Type: String
     AllowedValues:
@@ -432,17 +415,15 @@ Resources:
     Properties:
       TemplateURL: !Sub 'https://${QSS3BucketName}.s3.amazonaws.com/${QSS3KeyPrefix}submodules/quickstart-aws-vpc/templates/aws-vpc.template'
       Parameters:
-        AvailabilityZones: !Join [ ',', !Ref 'AvailabilityZones' ]
+        AvailabilityZones: 'ca-central-1a,ca-central-1b'
         KeyPairName: !Ref 'KeyPairName'
-        NumberOfAZs: '3'
+        NumberOfAZs: '2'
         PrivateSubnet1ACIDR: !Ref 'PrivateSubnet1CIDR'
         PrivateSubnet2ACIDR: !Ref 'PrivateSubnet2CIDR'
-        PrivateSubnet3ACIDR: !Ref 'PrivateSubnet3CIDR'
         PrivateSubnetATag2: !Sub "kubernetes.io/cluster/${AWS::StackName}-${AWS::Region}=owned"
         PrivateSubnetATag3: "kubernetes.io/role/internal-elb="
         PublicSubnet1CIDR: !Ref 'PublicSubnet1CIDR'
         PublicSubnet2CIDR: !Ref 'PublicSubnet2CIDR'
-        PublicSubnet3CIDR: !Ref 'PublicSubnet3CIDR'
         PublicSubnetTag2: !Sub "kubernetes.io/cluster/${AWS::StackName}-${AWS::Region}=owned"
         PublicSubnetTag3: "kubernetes.io/role/elb="
         VPCCIDR: !Ref 'VPCCIDR'
@@ -460,10 +441,8 @@ Resources:
         KeyPairName: !Ref 'KeyPairName'
         PrivateSubnet1ID: !GetAtt 'VPCStack.Outputs.PrivateSubnet1AID'
         PrivateSubnet2ID: !GetAtt 'VPCStack.Outputs.PrivateSubnet2AID'
-        PrivateSubnet3ID: !GetAtt 'VPCStack.Outputs.PrivateSubnet3AID'
         PublicSubnet1ID: !GetAtt 'VPCStack.Outputs.PublicSubnet1ID'
         PublicSubnet2ID: !GetAtt 'VPCStack.Outputs.PublicSubnet2ID'
-        PublicSubnet3ID: !GetAtt 'VPCStack.Outputs.PublicSubnet3ID'
         RemoteAccessCIDR: !Ref 'RemoteAccessCIDR'
         ContainerAccessCIDR: !Ref 'ContainerAccessCIDR'
         QSS3BucketName: !Ref 'QSS3BucketName'
@@ -491,6 +470,7 @@ Resources:
         GlusterFS: !Ref GlusterFS
         AutomationBroker: !Ref AutomationBroker
         AmiId: !Ref AmiId
+        OpenShiftOriginEnabled: !Ref 'OpenShiftOriginEnabled'
 Outputs:
   OpenShiftUI:
     Description: The URL OpenShiftUI

@@ -4,17 +4,33 @@ source ${P}
 
 if [ -f /quickstart/pre-install.sh ]
 then
+  chmod +x /quickstart/pre-install.sh
   /quickstart/pre-install.sh
 fi
 
 qs_enable_epel &> /var/log/userdata.qs_enable_epel.log
 
-qs_retry_command 25 aws s3 cp ${QS_S3URI}scripts/redhat_ose-register-${OCP_VERSION}.sh ~/redhat_ose-register.sh
-chmod 755 ~/redhat_ose-register.sh
-qs_retry_command 20 ~/redhat_ose-register.sh ${RH_USER} ${RH_PASS} ${RH_POOLID}
+case ${OCP_OR_ORIGIN} in
+    origin)
+        yum install -y centos-release-openshift-origin39
+        ;;
+    ocp)
+        qs_retry_command 25 aws s3 cp ${QS_S3URI}scripts/redhat_ose-register-${OCP_VERSION}.sh ~/redhat_ose-register.sh
+        chmod 755 ~/redhat_ose-register.sh
+        qs_retry_command 20 ~/redhat_ose-register.sh ${RH_USER} ${RH_PASS} ${RH_POOLID}
+        ;;
+    *)
+        echo "Unknown version ${OCP_OR_ORIGIN}"
+        exit 1
+        ;;
+esac
 
+
+# Using explicit path to ansible rpm. This resolves the issue of the version of Ansible changing in the repo (and Ansible 2.4 isn't supported
+# by the openshift-ansible project)
+# TODO: Add ansible as an RPM repo, then install the specific version. Make sure these values use parameters so users can define a custom repo 
+# in the case this is used in a locked down enterprise environment.
 qs_retry_command 10 yum -y install https://releases.ansible.com/ansible/rpm/release/epel-7-x86_64/ansible-2.6.5-1.el7.ans.noarch.rpm yum-versionlock
-sed -i 's/#host_key_checking = False/host_key_checking = False/g' /etc/ansible/ansible.cfg
 yum versionlock add ansible
 yum repolist -v | grep OpenShift
 
@@ -27,6 +43,8 @@ qs_retry_command 10 aws s3 cp ${QS_S3URI}scripts/scaling/aws_openshift_quickstar
 qs_retry_command 10 aws s3 cp ${QS_S3URI}scripts/scaling/aws_openshift_quickstart/utils.py /root/ose_scaling/aws_openshift_quickstart/utils.py
 qs_retry_command 10 aws s3 cp ${QS_S3URI}scripts/scaling/bin/aws-ose-qs-scale /root/ose_scaling/bin/aws-ose-qs-scale
 qs_retry_command 10 aws s3 cp ${QS_S3URI}scripts/scaling/setup.py /root/ose_scaling/setup.py
+
+
 if [ "${OCP_VERSION}" == "3.9" ] ; then
     qs_retry_command 10 aws s3 cp ${QS_S3URI}scripts/predefined_openshift_vars.txt /tmp/openshift_inventory_predefined_vars
 else
@@ -74,7 +92,25 @@ qs_retry_command 10 pip install urllib3
 if [ "${OCP_VERSION}" == "3.9" ] ; then
     qs_retry_command 10 yum -y install atomic-openshift-utils
 fi
-qs_retry_command 10 yum -y install atomic-openshift-excluder atomic-openshift-docker-excluder
+
+case ${OCP_OR_ORIGIN} in
+    origin)
+        qs_retry_command 10 yum -y install atomic-openshift-utils origin-docker-excluder origin-excluder origin-clients
+        origin-excluder unexclude
+        echo 'openshift_deployment_type=origin' >> /tmp/openshift_inventory_userdata_vars
+        echo 'oreg_url=docker.io/openshift/origin-${component}:${version}' >> /tmp/openshift_inventory_userdata_vars
+        ;;
+    ocp)
+        qs_retry_command 10 yum -y install atomic-openshift-excluder atomic-openshift-docker-excluder atomic-openshift-clients
+        atomic-openshift-excluder unexclude
+        ;;
+    *)
+        echo "Unknown version ${OCP_OR_ORIGIN}"
+        exit 1
+        ;;
+esac
+
+
 
 cd /tmp
 qs_retry_command 10 wget https://s3-us-west-1.amazonaws.com/amazon-ssm-us-west-1/latest/linux_amd64/amazon-ssm-agent.rpm
@@ -85,18 +121,15 @@ rm ./amazon-ssm-agent.rpm
 cd -
 
 if [ "${GET_ANSIBLE_FROM_GIT}" == "True" ]; then
-  CURRENT_PLAYBOOK_VERSION=https://github.com/openshift/openshift-ansible/archive/openshift-ansible-${OCP_ANSIBLE_RELEASE}.tar.gz
-  curl  --retry 5  -Ls ${CURRENT_PLAYBOOK_VERSION} -o openshift-ansible.tar.gz
-  tar -zxf openshift-ansible.tar.gz
   rm -rf /usr/share/ansible
   mkdir -p /usr/share/ansible
-  mv openshift-ansible-* /usr/share/ansible/openshift-ansible
+  # TODO: need to account for locked down enterprise environment
+  git clone --single-branch -b release-${OCP_VERSION} https://github.com/openshift/openshift-ansible.git /usr/share/ansible/openshift-ansible
 else
   qs_retry_command 10 yum -y install openshift-ansible
 fi
 
-qs_retry_command 10 yum -y install atomic-openshift-excluder atomic-openshift-docker-excluder
-atomic-openshift-excluder unexclude
+
 
 qs_retry_command 10 aws s3 cp ${QS_S3URI}scripts/scaleup_wrapper.yml  /usr/share/ansible/openshift-ansible/
 qs_retry_command 10 aws s3 cp ${QS_S3URI}scripts/bootstrap_wrapper.yml /usr/share/ansible/openshift-ansible/
@@ -122,6 +155,9 @@ qs_retry_command 10 aws autoscaling attach-load-balancer-target-groups --auto-sc
 
 /bin/aws-ose-qs-scale --generate-initial-inventory --ocp-version ${OCP_VERSION} --write-hosts-to-tempfiles --debug
 cat /tmp/openshift_ansible_inventory* >> /tmp/openshift_inventory_userdata_vars || true
+# Ansible configuration
+# Setting host_key_checking to false is NOT best practices, but a stop gap here. Assuming you trust your DNS generating the known_hosts file before hand would be ideal.
+sed -i 's/#host_key_checking = False/host_key_checking = False/g' /etc/ansible/ansible.cfg
 sed -i 's/#pipelining = False/pipelining = True/g' /etc/ansible/ansible.cfg
 sed -i 's/#log_path/log_path/g' /etc/ansible/ansible.cfg
 sed -i 's/#stdout_callback.*/stdout_callback = json/g' /etc/ansible/ansible.cfg
@@ -130,13 +166,19 @@ sed -i 's/#deprecation_warnings = True/deprecation_warnings = False/g' /etc/ansi
 qs_retry_command 50 ansible -m ping all
 
 ansible-playbook /usr/share/ansible/openshift-ansible/bootstrap_wrapper.yml > /var/log/bootstrap.log
+
 ansible-playbook /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml >> /var/log/bootstrap.log
 ansible-playbook /usr/share/ansible/openshift-ansible/playbooks/deploy_cluster.yml >> /var/log/bootstrap.log
 
-ansible masters -a "htpasswd -b /etc/origin/master/htpasswd admin ${OCP_PASS}"
-aws autoscaling resume-processes --auto-scaling-group-name ${OPENSHIFTMASTERASG} --scaling-processes HealthCheck --region ${AWS_REGION}
+# Alternative authentication will be handled in pre-install hooks.
+# Check if htpasswd is defined in ansible vars file, if it is, then it's using local auth and the htpasswd needs to be
+# generated.
+if [ ! -z "$(grep htpasswd /etc/ansible/hosts)" ]
+then
+    ansible masters -a "htpasswd -b /etc/origin/master/htpasswd admin ${OCP_PASS}"
+fi
 
-qs_retry_command 10 yum install -y atomic-openshift-clients
+aws autoscaling resume-processes --auto-scaling-group-name ${OPENSHIFTMASTERASG} --scaling-processes HealthCheck --region ${AWS_REGION}
 AWSSB_SETUP_HOST=$(head -n 1 /tmp/openshift_initial_masters)
 mkdir -p ~/.kube/
 scp $AWSSB_SETUP_HOST:~/.kube/config ~/.kube/config
@@ -163,5 +205,7 @@ rm -rf /tmp/openshift_initial_*
 
 if [ -f /quickstart/post-install.sh ]
 then
-  /quickstart/post-install.sh
+  chmod +x /quickstart/post-install.sh
+  # OR with true to ignore errors - this prevents the post-install hooks from causing the entire deployment to fail.
+  /quickstart/post-install.sh || true
 fi
